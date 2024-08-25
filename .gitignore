@@ -1,0 +1,13 @@
+# Ignore the node_modules folder
+node_modules/
+
+# Ignore the .env file
+.env
+
+# Ignore files inside the screenshots and logs folders, but keep the folders themselves
+screenshots/*
+logs/*
+
+# Allow the inclusion of empty screenshots and logs folders
+!screenshots/.gitkeep
+!logs/.gitkeep
