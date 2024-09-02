@@ -4,7 +4,7 @@ node_modules/
 # Ignore the .env file
 .env
 
-# Ignore files inside the screenshots and logs folders, but keep the folders themselves
+# Ignore all files inside the screenshots and logs folders
 screenshots/*
 logs/*
 

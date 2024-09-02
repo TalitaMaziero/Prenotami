@@ -3,17 +3,47 @@ import dotenv from 'dotenv';
 import takeScreenshot from './screenShot.js';
 import { sendEmailWithAttachment } from './email/sendEmail.js';
 import { login } from './utils/login.js';
-import { fileURLToPath } from 'url';
-import fs from 'fs';
-import path from 'path';
+import logger from './utils/logger.js';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+let searchCounter = 0;
 
-const logErrorPath = path.join(__dirname, '..', 'logs', 'agendamento_error_log.txt');
-const logPath = path.join(__dirname, '..', 'logs', 'agendamento_log.txt');
+async function handleModalAndNotify(driver) {
+    let logMessage;
+
+    try {
+        const modalElements = await driver.findElements(By.css('.jconfirm-content'));
+
+        if (modalElements.length > 0) {
+            const alertBox = modalElements[0];
+            const message = await alertBox.getText();
+
+            if (message.includes('Sorry, all appointments for this service are currently booked. Please check again tomorrow for cancellations or new appointments.')) {
+                logMessage =  `Não há vagas disponíveis: ${message}\n`;
+            } else {
+                logMessage = `Mensagem diferente encontrada \n`;
+                const screenshotPath = await takeScreenshot(driver);
+                await sendEmailWithAttachment(screenshotPath);
+            }
+
+            logger.info(logMessage);
+          
+            const closeButton = await driver.findElement(By.css('.jconfirm-buttons .btn.btn-blue'));
+            await closeButton.click();
+
+        } else {
+            logger.info('Modal não encontrada');
+            const screenshotPath = await takeScreenshot(driver);
+            await sendEmailWithAttachment(screenshotPath);
+        }
+
+    } catch (err) {
+        logger.error(err);
+        await driver.quit(); 
+        process.exit(1);
+    }
+}
 
 async function clickAdvancedAndReserve(driver) {
     try {
@@ -22,8 +52,26 @@ async function clickAdvancedAndReserve(driver) {
         let reserveButton = await driver.findElement(By.css('a[href="/Services/Booking/751"] button'));
         await reserveButton.click();
     } catch (err) {
-        const logMessage = `${new Date().toLocaleString()} - Erro ao clicar em 'advanced' ou 'Reservar': ${err}\n`;
-        fs.appendFileSync(logErrorPath, logMessage);
+        logger.error(`Erro ao clicar em 'advanced' ou 'Reservar: ' ${err}`);
+        await driver.quit(); 
+        process.exit(1);
+    }
+}
+
+async function startProcess(driver) {
+
+    searchCounter++; 
+    logger.info(`Iniciando consulta número: ${searchCounter}`);
+
+    await clickAdvancedAndReserve(driver);
+    await handleModalAndNotify(driver);
+
+    if (searchCounter < 5) { 
+        setTimeout(() => startProcess(driver), 2 * 60 * 1000); 
+    } else {
+        logger.info('Número máximo de consultas atingido. Encerrando aplicação.');
+        await driver.quit(); 
+        process.exit(0);
     }
 }
 
@@ -33,30 +81,15 @@ async function clickAdvancedAndReserve(driver) {
     try {
         await driver.get('https://prenotami.esteri.it/Home?ReturnUrl=%2fUserArea');
 
-        await login(driver);
-        await clickAdvancedAndReserve(driver);
+        const isLoggedIn = await login(driver);
 
-        try {
-            await driver.wait(until.elementLocated(By.css('.jconfirm-content')), 10000);
-            const alertBox = await driver.findElement(By.css('.jconfirm-content'));
-            const message = await alertBox.getText();
-            let logMessage;
-
-            if (message.includes('Sorry, all appointments for this service are currently booked. Please check again tomorrow for cancellations or new appointments.')) {
-                logMessage = `${new Date().toLocaleString()} - Não há vagas disponíveis: ${message}\n`;
-            } else {
-                logMessage = `${new Date().toLocaleString()} - Mensagem diferente encontrada: ${message}\n`;
-                const screenshotPath = await takeScreenshot(driver);
-                await sendEmailWithAttachment(screenshotPath);
-            }
-
-            fs.appendFileSync(logPath, logMessage);
-        } catch (err) {
-            console.log('error: ', err);
-            const logMessage = `${new Date().toLocaleString()} - ${err}\n`;
-            fs.appendFileSync(logErrorPath, logMessage);
+        if (isLoggedIn) {
+            await startProcess(driver);
         }
-    } finally {
-        await driver.quit();
+
+    } catch (err) {
+        logger.error(err);
+        await driver.quit(); 
+        process.exit(1);
     }
 })();
